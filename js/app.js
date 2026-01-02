@@ -1,3 +1,34 @@
+const socket = new WebSocket(
+  "wss://zpxfdq7u6f.execute-api.us-east-1.amazonaws.com/production/"
+);
+
+socket.onopen = () => {
+  console.log("WebSocket connected");
+};
+
+socket.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+  console.log("Broadcast received:", data);
+
+    //Update UI with live results
+  if (data.votes && polls[currentPollIndex]) {
+    let current = polls[currentPollIndex];
+    current.answersWeight = current.answers.map(
+      a => data.votes[a] || 0
+    );
+    current.pollCount = current.answersWeight.reduce((a,b) => a + b, 0);
+    showResults();
+  }
+};
+
+socket.onerror = (err) => {
+  console.error("WebSocket error:", err);
+};
+
+socket.onclose = () => {
+  console.log("WebSocket disconnected");
+};
+
 let polls = [
   {
     question:"What's your favorite snack?",
@@ -53,6 +84,16 @@ function markAnswer(i){
     document.querySelector(".poll .answers .answer.selected").classList.remove("selected");
   } catch(msg){}
   document.querySelectorAll(".poll .answers .answer")[+i].classList.add("selected");
+
+  //SEND VOTE VIA WEBSOCKET
+  if (socket.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify({
+      action: "sendVote",
+      pollId: "num101",
+      option: poll.answers[i]
+    }));
+  }
+
   showResults();
 }
 
