@@ -1,36 +1,78 @@
-const socket = new WebSocket(
-  "wss://zpxfdq7u6f.execute-api.us-east-1.amazonaws.com/production/"
-);
+let socket = null;
+let reconnectDelay = 1000;
+let maxReconnectDelay = 30000;
+let heartbeatTimer = null;
 
-socket.onopen = () => {
-  console.log("WebSocket connected");
-};
+function createSocket() {
+  socket = new WebSocket(
+    "wss://zpxfdq7u6f.execute-api.us-east-1.amazonaws.com/production/"
+  );
 
-socket.onmessage = (event) => {
-  const data = JSON.parse(event.data);
-  console.log("Broadcast received:", data);
+  socket.onopen = () => {
+    console.log("WebSocket connected");
+    reconnectDelay = 1000; // reset backoff
+    // start heartbeat to keep connection alive
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
+    heartbeatTimer = setInterval(() => {
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: "ping" }));
+      }
+    }, 25000);
+  };
 
-    //Update UI with live results
-  if (data.votes && polls[currentPollIndex]) {
-    let current = polls[currentPollIndex];
-    current.answersWeight = current.answers.map(
-      a => data.votes[a] || 0
-    );
-    current.pollCount = current.answersWeight.reduce((a,b) => a + b, 0);
-    showResults();
-  }
-};
+  socket.onmessage = (event) => {
+    let data;
+    try {
+      data = JSON.parse(event.data);
+    } catch (e) {
+      console.warn("Invalid WS message", event.data);
+      return;
+    }
 
-socket.onerror = (err) => {
-  console.error("WebSocket error:", err);
-};
+    console.log("Broadcast received:", data);
 
-socket.onclose = () => {
-  console.log("WebSocket disconnected");
-};
+    // Handle poll-update with full state
+    if (data.type === "poll-update" && Array.isArray(data.polls)) {
+      data.polls.forEach((serverPoll) => {
+        let idx = polls.findIndex(p => p.pollId === serverPoll.pollId);
+        if (idx > -1) {
+          polls[idx].answersWeight = serverPoll.answersWeight || [];
+          polls[idx].pollCount = serverPoll.pollCount || 0;
+          if (idx === currentPollIndex) showResults();
+        }
+      });
+      return;
+    }
+
+    // Legacy format: { votes: { "Chocolate": 5, "Cupcakes": 3, ... } }
+    if (data.votes && polls[currentPollIndex]) {
+      let current = polls[currentPollIndex];
+      current.answersWeight = current.answers.map(a => data.votes[a] || 0);
+      current.pollCount = current.answersWeight.reduce((a,b) => a + b, 0);
+      showResults();
+    }
+  };
+
+  socket.onerror = (err) => {
+    console.error("WebSocket error:", err);
+  };
+
+  socket.onclose = () => {
+    console.log("WebSocket disconnected, reconnecting in", reconnectDelay + "ms");
+    if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+    setTimeout(() => {
+      reconnectDelay = Math.min(maxReconnectDelay, reconnectDelay * 2);
+      createSocket();
+    }, reconnectDelay);
+  };
+}
+
+// Initialize WebSocket on page load
+createSocket();
 
 let polls = [
   {
+    pollId: "snack-poll",
     question:"What's your favorite snack?",
     answers:["Chocolate", "Cupcakes", "Donuts", "Brownies"],
     pollCount:20,
@@ -38,6 +80,7 @@ let polls = [
     selectedAnswer:-1
   },
   {
+    pollId: "movie-poll",
     question:"What's your favorite movie?",
     answers:["Action", "Comedy", "Drama", "Horror"],
     pollCount:20,
@@ -85,33 +128,31 @@ function markAnswer(i){
   } catch(msg){}
   document.querySelectorAll(".poll .answers .answer")[+i].classList.add("selected");
 
-  //SEND VOTE VIA WEBSOCKET
-  if (socket.readyState === WebSocket.OPEN) {
+  // Optimistic UI update (show vote immediately)
+  poll.answersWeight[i]++;
+  poll.pollCount++;
+  showResults();
+
+  // SEND VOTE VIA WEBSOCKET
+  if (socket && socket.readyState === WebSocket.OPEN) {
     socket.send(JSON.stringify({
       action: "sendVote",
-      pollId: "num101",
+      pollId: poll.pollId,
+      optionIndex: i,
       option: poll.answers[i]
     }));
+  } else {
+    console.warn("WebSocket not ready, vote may not sync");
   }
-
-  showResults();
 }
 
 function showResults(){
   let answers = document.querySelectorAll(".poll .answers .answer");
   for(let i=0;i<answers.length;i++){
-    let votes = 0;
+    let votes = poll.answersWeight[i];
     let percentage = 0;
-    if(i == poll.selectedAnswer){
-      votes = poll.answersWeight[i] + 1;
-      percentage = Math.round(
-        (poll.answersWeight[i]+1) * 100 / (poll.pollCount+1)
-      );
-    } else {
-      votes = poll.answersWeight[i];
-      percentage = Math.round(
-        (poll.answersWeight[i]) * 100 / (poll.pollCount+1)
-      );
+    if(poll.pollCount > 0){
+      percentage = Math.round(votes * 100 / poll.pollCount);
     }
     
     answers[i].querySelector(".percentage-bar").style.width = percentage + "%";
