@@ -30,16 +30,6 @@ python -m http.server 8000
 **Features**
 - Create or load polls (UI depends on `js/app.js`).
 - Vote and see results (client-side behavior).
+  
 
-**Development Notes**
-- No build tools required — edit `css/style.css`, `js/app.js`, and `index.html` directly.
-- Keep scripts and styles organized; add small helper functions in `js/app.js`.
-
-**Contributing**
-- Feel free to open issues or submit pull requests with improvements or bug fixes.
-
-**License & Contact**
-- Use or modify this project freely. Add a license file if you need explicit terms.
-- For questions, reply in the repo or add a contact section here.
-
-Enjoy exploring and customizing this simple poll website!
+Enjoy this simple poll website!
